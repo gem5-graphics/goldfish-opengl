@@ -42,6 +42,7 @@ public:
     }
 
     unsigned char *alloc(size_t len) {
+        flush();
 
         if (m_buf && len > m_free) {
             if (flush() < 0) {
@@ -68,7 +69,7 @@ public:
         return ptr;
     }
 
-    int flush() {
+    inline int flush() {
 
         if (!m_buf || m_free == m_bufsize) return 0;
 

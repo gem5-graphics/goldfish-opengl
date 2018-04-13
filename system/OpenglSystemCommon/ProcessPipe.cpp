@@ -19,6 +19,14 @@
 
 #include <cutils/log.h>
 #include <pthread.h>
+#include <Gem5PipeStream.h>
+
+//TODO: only needed for pid
+#include <sys/types.h>
+#include <unistd.h>
+
+extern const int sUseGem5Pipe;
+static void gem5ProcessPipeInitOnce();
 
 static int                sProcPipe = 0;
 static pthread_once_t     sProcPipeOnce = PTHREAD_ONCE_INIT;
@@ -34,6 +42,13 @@ static uint64_t           sProcUID = 0;
 // Processes are identified by acquiring a per-process 64bit unique ID from the
 // host.
 static void processPipeInitOnce() {
+    //check if we are using gem5 pipe
+    if(sUseGem5Pipe){
+      gem5ProcessPipeInitOnce();
+      return;
+    }
+
+    //otherwise use the qemu pipe
     sProcPipe = qemu_pipe_open("GLProcessPipe");
     if (sProcPipe < 0) {
         sProcPipe = 0;
@@ -75,4 +90,34 @@ bool processPipeInit(renderControl_encoder_context_t *rcEnc) {
     if (!sProcPipe) return false;
     rcEnc->rcSetPuid(rcEnc, sProcUID);
     return true;
+}
+
+static void gem5ProcessPipeInitOnce(){
+  ALOGI(">> gem5ProcessPipeInitOnce calling\n", gem5_get_procId);
+
+  //TODO: fixme
+  //use pid & tid for now
+  sProcUID= (((uint64_t)getpid() << 32 ) | gettid());
+  sProcPipe = -1;
+
+
+  /*gpusyscall_t call_params;
+  call_params.pid = getpid();
+  call_params.tid = gettid();
+  call_params.num_args = 0;
+  call_params.total_bytes =  0;
+
+  call_params.ret = new char[sizeof(uint64_t)];
+  uint64_t * ret_spot = (uint64_t*)call_params.ret;
+  *ret_spot = 0;
+
+  m5_gpu(gem5_get_procId, (uint64_t) &call_params);
+
+  sProcUID= *((uint64_t*)call_params.ret);
+  sProcPipe = -1;
+
+  ALOGI("gem5ProcessPipeInitOnce received a return value of %lx \n", sProcUID);
+
+  delete [] call_params.ret;
+  */
 }

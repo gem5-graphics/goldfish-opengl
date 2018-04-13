@@ -19,6 +19,7 @@
 #include "GL2Encoder.h"
 #include "ProcessPipe.h"
 #include "QemuPipeStream.h"
+#include "Gem5PipeStream.h"
 #include "TcpStream.h"
 #include "ThreadInfo.h"
 
@@ -27,8 +28,11 @@
 #define STREAM_BUFFER_SIZE  (4*1024*1024)
 #define STREAM_PORT_NUM     22468
 
-/* Set to 1 to use a QEMU pipe, or 0 for a TCP connection */
-#define  USE_QEMU_PIPE  1
+/* Set to 1 to either QEMU or Gem5 pipe, or both 0 for a TCP connection */
+extern "C" const int sUseQemuPipe = 0;
+extern "C" const int sUseGem5Pipe = 1;
+
+#define  LOG_TAG  "gem5-tag"
 
 HostConnection::HostConnection() :
     m_stream(NULL),
@@ -55,21 +59,26 @@ HostConnection *HostConnection::get() {
 
 HostConnection *HostConnection::getWithThreadInfo(EGLThreadInfo* tinfo) {
 
+    DBG("HostConnection::get () is called from pid=%d, tid=%d", getpid(), gettid());
+
     /* TODO: Make this configurable with a system property */
-    const int useQemuPipe = USE_QEMU_PIPE;
 
     // Get thread info
     if (!tinfo) {
+        ALOGD("Recevied a NULL ThreadInfo object \n");
         return NULL;
     }
 
     if (tinfo->hostConn == NULL) {
+        DBG("Creating a HostConnection \n");
         HostConnection *con = new HostConnection();
         if (NULL == con) {
+            ALOGD("Failed to create a HostConnection object \n");
             return NULL;
         }
 
-        if (useQemuPipe) {
+        if (sUseQemuPipe) {
+            ALOGI("Using Qemu pipe");
             QemuPipeStream *stream = new QemuPipeStream(STREAM_BUFFER_SIZE);
             if (!stream) {
                 ALOGE("Failed to create QemuPipeStream for host connection!!!\n");
@@ -84,8 +93,19 @@ HostConnection *HostConnection::getWithThreadInfo(EGLThreadInfo* tinfo) {
             }
             con->m_stream = stream;
             con->m_pipeFd = stream->getSocket();
-        }
-        else /* !useQemuPipe */
+        } else if (sUseGem5Pipe) {
+            ALOGI("Using gem5 pipe");
+            Gem5PipeStream *stream = new Gem5PipeStream(STREAM_BUFFER_SIZE);
+            if (!stream) {
+                ALOGE("Failed to create Gem5PipeStream for host connection!!!\n");
+                delete con;
+                return NULL;
+            }
+            con->m_stream = stream;
+             //NOTE: not sure if we need to set this one
+            //con->m_pipeFd = stream->getSocket();
+            con->m_pipeFd = NULL;
+        } else /* !sUseQemuPipe || !sUseGem5Pipe*/
         {
             TcpStream *stream = new TcpStream(STREAM_BUFFER_SIZE);
             if (!stream) {
@@ -109,10 +129,11 @@ HostConnection *HostConnection::getWithThreadInfo(EGLThreadInfo* tinfo) {
         *pClientFlags = 0;
         con->m_stream->commitBuffer(sizeof(unsigned int));
 
-        ALOGD("HostConnection::get() New Host Connection established %p, tid %d\n", con, gettid());
+        ALOGI("HostConnection::get() New Host Connection established %p, tid %d\n", con, gettid());
         tinfo->hostConn = con;
     }
 
+    DBG("HostConnection::get() is returning");
     return tinfo->hostConn;
 }
 
@@ -191,6 +212,7 @@ const std::string& HostConnection::queryGLExtensions(ExtendedRCEncoderContext *r
 
     // rcGetGLString() returns required size including the 0-terminator, so
     // account it when passing/using the sizes.
+
     int extensionSize = rcEnc->rcGetGLString(rcEnc, GL_EXTENSIONS,
                                              &extensions_buffer[0],
                                              extensions_buffer.size() + 1);
@@ -210,6 +232,7 @@ const std::string& HostConnection::queryGLExtensions(ExtendedRCEncoderContext *r
 }
 
 void HostConnection::setChecksumHelper(ExtendedRCEncoderContext *rcEnc) {
+    return;
     const std::string& glExtensions = queryGLExtensions(rcEnc);
     // check the host supported version
     uint32_t checksumVersion = 0;
@@ -229,6 +252,8 @@ void HostConnection::setChecksumHelper(ExtendedRCEncoderContext *rcEnc) {
 }
 
 void HostConnection::queryAndSetSyncImpl(ExtendedRCEncoderContext *rcEnc) {
+    rcEnc->setSyncImpl(SYNC_IMPL_NONE);
+    return;
     const std::string& glExtensions = queryGLExtensions(rcEnc);
 #if PLATFORM_SDK_VERSION <= 16 || (!defined(__i386__) && !defined(__x86_64__))
     rcEnc->setSyncImpl(SYNC_IMPL_NONE);
@@ -242,6 +267,8 @@ void HostConnection::queryAndSetSyncImpl(ExtendedRCEncoderContext *rcEnc) {
 }
 
 void HostConnection::queryAndSetDmaImpl(ExtendedRCEncoderContext *rcEnc) {
+    rcEnc->setDmaImpl(DMA_IMPL_NONE);
+    return;
     std::string glExtensions = queryGLExtensions(rcEnc);
 #if PLATFORM_SDK_VERSION <= 16 || (!defined(__i386__) && !defined(__x86_64__))
     rcEnc->setDmaImpl(DMA_IMPL_NONE);
